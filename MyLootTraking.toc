@@ -1,0 +1,36 @@
+## Interface: 20504
+## Title: MyLootTraking
+## Notes: Track loot wishlists across all your characters. Get alerts when items drop!
+## Notes-frFR: Suivez vos listes de loot sur tous vos personnages. Alertes quand un objet drop !
+## Notes-deDE: Verfolge Loot-Wunschlisten für alle Charaktere. Benachrichtigungen bei Drops!
+## Notes-esES: Rastrea listas de botín en todos tus personajes. ¡Alertas cuando un objeto cae!
+## Author: MyLootTraking Team
+## Version: 1.0.0
+## SavedVariables: MyLootTrakingDB
+## SavedVariablesPerCharacter: MyLootTrakingCharDB
+
+Locales\enUS.lua
+Locales\frFR.lua
+Locales\deDE.lua
+Locales\esES.lua
+Locales\ruRU.lua
+Locales\koKR.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+Locales\ptBR.lua
+
+Core.lua
+Database.lua
+Utils.lua
+LootDetection.lua
+Statistics.lua
+Alerts.lua
+TooltipHook.lua
+MinimapButton.lua
+MiniTracker.lua
+MainFrame.lua
+SearchFrame.lua
+ConfigFrame.lua
+SlashCommands.lua
+ImportExport.lua
+AtlasLootIntegration.lua
