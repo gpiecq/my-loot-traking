@@ -1,0 +1,29 @@
+name: Build Addon ZIP
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ZIP
+        run: |
+          ADDON_NAME="MyLootTraking"
+          mkdir -p "$ADDON_NAME/Locales"
+
+          # Copy addon files (everything referenced in .toc + .toc itself)
+          cp *.toc *.lua "$ADDON_NAME/"
+          cp Locales/*.lua "$ADDON_NAME/Locales/"
+
+          zip -r "${ADDON_NAME}.zip" "$ADDON_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MyLootTraking
+          path: MyLootTraking.zip
