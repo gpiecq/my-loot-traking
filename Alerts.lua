@@ -1,15 +1,16 @@
 -- MyLootTraking Alerts
--- Popup notifications and sound alerts
+-- Popup notifications and sound alerts with queue system
 
 local _, MLT = ...
 
-local ALERT_DURATION = 5  -- seconds
+local ALERT_DURATION = 4  -- seconds
 local ALERT_FADE = 1      -- fade out duration
 
 ----------------------------------------------
 -- Initialize Alerts
 ----------------------------------------------
 function MLT:InitAlerts()
+    self.alertQueue = {}
     self:CreateAlertFrame()
     self:CreateDungeonEntryFrame()
 end
@@ -34,7 +35,6 @@ function MLT:CreateAlertFrame()
     end)
     frame:SetScript("OnMouseUp", function(self, button)
         self:StopMovingOrSizing()
-        -- Save position
         local point, _, relPoint, x, y = self:GetPoint()
         MLT.db.config.alertPoint = {point, relPoint, x, y}
     end)
@@ -87,6 +87,8 @@ function MLT:CreateAlertFrame()
     frame.fadeAnim:SetScript("OnFinished", function()
         frame:Hide()
         frame:SetAlpha(1)
+        -- Show next alert in queue
+        MLT:ProcessAlertQueue()
     end)
 
     -- Restore saved position
@@ -100,32 +102,28 @@ function MLT:CreateAlertFrame()
 end
 
 ----------------------------------------------
--- Show Group Drop Alert
+-- Alert Queue System
 ----------------------------------------------
-function MLT:ShowGroupDropAlert(itemLink, entries)
-    local L = self.L
-    local frame = self.alertFrame
-    if not frame then return end
-
-    local itemID = self:ExtractItemID(itemLink)
-    local itemName, _, itemQuality, _, _, _, _, _, _, itemTexture = GetItemInfo(itemID)
-
-    frame.icon:SetTexture(itemTexture)
-
-    -- Orange border for group drop
-    frame.topBorder:SetColorTexture(1, 0.6, 0, 1)
-
-    frame.title:SetText("⚡ " .. L["ALERT_GROUP_DROP"])
-    frame.title:SetTextColor(1, 0.6, 0)
-
-    frame.itemName:SetText(self:FormatItemWithColor(itemName, itemQuality))
-
-    -- Show which list(s) the item is in
-    local listNames = {}
-    for _, entry in ipairs(entries) do
-        table.insert(listNames, entry.listName)
+function MLT:QueueAlert(alertData)
+    table.insert(self.alertQueue, alertData)
+    -- If no alert is currently showing, display immediately
+    if not self.alertFrame:IsShown() then
+        self:ProcessAlertQueue()
     end
-    frame.subtitle:SetText(table.concat(listNames, ", "))
+end
+
+function MLT:ProcessAlertQueue()
+    if #self.alertQueue == 0 then return end
+
+    local alert = table.remove(self.alertQueue, 1)
+    local frame = self.alertFrame
+
+    frame.icon:SetTexture(alert.texture)
+    frame.topBorder:SetColorTexture(alert.borderR, alert.borderG, alert.borderB, 1)
+    frame.title:SetText(alert.titleText)
+    frame.title:SetTextColor(alert.borderR, alert.borderG, alert.borderB)
+    frame.itemName:SetText(alert.itemText)
+    frame.subtitle:SetText(alert.subtitleText)
 
     frame:SetAlpha(1)
     frame:Show()
@@ -134,36 +132,49 @@ function MLT:ShowGroupDropAlert(itemLink, entries)
 end
 
 ----------------------------------------------
--- Show Personal Loot Alert
+-- Show Group Drop Alert
 ----------------------------------------------
-function MLT:ShowPersonalLootAlert(itemLink, entries)
+function MLT:ShowGroupDropAlert(itemLink, entries)
     local L = self.L
-    local frame = self.alertFrame
-    if not frame then return end
 
     local itemID = self:ExtractItemID(itemLink)
     local itemName, _, itemQuality, _, _, _, _, _, _, itemTexture = GetItemInfo(itemID)
-
-    frame.icon:SetTexture(itemTexture)
-
-    -- Green border for personal loot
-    frame.topBorder:SetColorTexture(0, 1, 0.3, 1)
-
-    frame.title:SetText("✅ " .. L["ALERT_PERSONAL_LOOT"])
-    frame.title:SetTextColor(0, 1, 0.3)
-
-    frame.itemName:SetText(self:FormatItemWithColor(itemName, itemQuality))
 
     local listNames = {}
     for _, entry in ipairs(entries) do
         table.insert(listNames, entry.listName)
     end
-    frame.subtitle:SetText(table.concat(listNames, ", "))
 
-    frame:SetAlpha(1)
-    frame:Show()
-    frame.fadeAnim:Stop()
-    frame.fadeAnim:Play()
+    self:QueueAlert({
+        texture = itemTexture,
+        borderR = 1, borderG = 0.6, borderB = 0,
+        titleText = "|cffff9900!|r " .. L["ALERT_GROUP_DROP"],
+        itemText = self:FormatItemWithColor(itemName, itemQuality),
+        subtitleText = table.concat(listNames, ", "),
+    })
+end
+
+----------------------------------------------
+-- Show Personal Loot Alert
+----------------------------------------------
+function MLT:ShowPersonalLootAlert(itemLink, entries)
+    local L = self.L
+
+    local itemID = self:ExtractItemID(itemLink)
+    local itemName, _, itemQuality, _, _, _, _, _, _, itemTexture = GetItemInfo(itemID)
+
+    local listNames = {}
+    for _, entry in ipairs(entries) do
+        table.insert(listNames, entry.listName)
+    end
+
+    self:QueueAlert({
+        texture = itemTexture,
+        borderR = 0, borderG = 1, borderB = 0.3,
+        titleText = "|cff00ff4c+|r " .. L["ALERT_PERSONAL_LOOT"],
+        itemText = self:FormatItemWithColor(itemName, itemQuality),
+        subtitleText = table.concat(listNames, ", "),
+    })
 end
 
 ----------------------------------------------
@@ -241,7 +252,7 @@ function MLT:ShowDungeonEntryAlert(items, zoneName)
 
     -- Play dungeon entry sound
     if self.db.config.enableSound then
-        PlaySoundFile(self.SOUNDS.DUNGEON_ENTER, "Master")
+        PlaySound(self.SOUNDS.DUNGEON_ENTER, "Master")
     end
 
     frame:SetAlpha(1)

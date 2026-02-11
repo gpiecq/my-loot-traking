@@ -7,6 +7,8 @@ local _, MLT = ...
 -- Initialize Tooltip Hooks
 ----------------------------------------------
 function MLT:InitTooltipHooks()
+    self.currentTooltipItemID = nil
+
     -- Hook the main game tooltip
     GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
         MLT:OnTooltipSetItem(tooltip)
@@ -15,6 +17,11 @@ function MLT:InitTooltipHooks()
     -- Hook ItemRefTooltip (shift-clicked items in chat)
     ItemRefTooltip:HookScript("OnTooltipSetItem", function(tooltip)
         MLT:OnTooltipSetItem(tooltip)
+    end)
+
+    -- Clear tracked item when tooltip hides
+    GameTooltip:HookScript("OnHide", function()
+        MLT.currentTooltipItemID = nil
     end)
 end
 
@@ -28,6 +35,25 @@ function MLT:OnTooltipSetItem(tooltip)
     local itemID = self:ExtractItemID(itemLink)
     if not itemID then return end
 
+    -- Store for Ctrl+RightClick detection on any frame
+    self.currentTooltipItemID = itemID
+
+    -- Hook the tooltip owner for Ctrl+RightClick (once per frame)
+    local owner = tooltip:GetOwner()
+    if owner and not owner.mltCtrlClickHooked then
+        owner.mltCtrlClickHooked = true
+        owner:HookScript("OnMouseDown", function(_, button)
+            if button == "RightButton" and IsControlKeyDown() and MLT.currentTooltipItemID then
+                local id = MLT.currentTooltipItemID
+                MLT.currentTooltipItemID = nil
+                local source = MLT.GetAtlasLootContext and MLT:GetAtlasLootContext() or nil
+                C_Timer.After(0, function()
+                    MLT:ShowAddToListMenu(id, source)
+                end)
+            end
+        end)
+    end
+
     -- Check if item is in any tracked list
     local tracked = self.trackedItemCache[itemID]
     if tracked then
@@ -36,7 +62,12 @@ function MLT:OnTooltipSetItem(tooltip)
 
         for _, entry in ipairs(tracked) do
             local listText = "  • " .. entry.listName
-            if entry.assignedTo then
+            if entry.listType == "farm" and entry.targetQty then
+                local cur = entry.currentQty or 0
+                local tgt = entry.targetQty or 1
+                local farmColor = cur >= tgt and "|cff00ff00" or "|cffffff00"
+                listText = listText .. " " .. farmColor .. format(self.L["FARM_PROGRESS"], cur, tgt) .. "|r"
+            elseif entry.assignedTo then
                 listText = listText .. " (" .. entry.assignedTo .. ")"
             end
             tooltip:AddLine(listText, 0, 0.8, 1)
@@ -45,25 +76,21 @@ function MLT:OnTooltipSetItem(tooltip)
         tooltip:Show()
     end
 
-    -- Add the "Add to MLT" button info at the bottom
-    if not tracked or #tracked == 0 then
-        -- Only show hint if not already tracked
-        tooltip:AddLine(" ")
-        tooltip:AddDoubleLine(
-            self.ADDON_COLOR .. "Shift+Right-Click|r",
-            self.ADDON_COLOR .. self.L["ADD_ITEM"] .. "|r"
-        )
-        tooltip:Show()
-    end
+    -- Add the "Add to MLT" hint at the bottom
+    tooltip:AddLine(" ")
+    tooltip:AddDoubleLine(
+        self.ADDON_COLOR .. "Ctrl+Right-Click|r",
+        self.ADDON_COLOR .. self.L["ADD_ITEM"] .. "|r"
+    )
+    tooltip:Show()
 end
 
 ----------------------------------------------
--- Shift+Right-Click to add item
+-- Ctrl+Right-Click to add item (chat links)
 ----------------------------------------------
--- Hook WorldFrame for click detection on items
 local origSetItemRef = SetItemRef
 function SetItemRef(link, text, button, chatFrame)
-    if button == "RightButton" and IsShiftKeyDown() then
+    if button == "RightButton" and IsControlKeyDown() then
         local itemID = MLT:ExtractItemID(link)
         if itemID then
             MLT:ShowAddToListMenu(itemID)
@@ -76,7 +103,7 @@ end
 ----------------------------------------------
 -- Show "Add to List" Menu
 ----------------------------------------------
-function MLT:ShowAddToListMenu(itemID)
+function MLT:ShowAddToListMenu(itemID, source)
     local L = self.L
 
     -- Create dropdown menu if not exists
@@ -85,30 +112,50 @@ function MLT:ShowAddToListMenu(itemID)
     end
 
     local function InitMenu(self, level, menuList)
-        local lists = MLT:GetLists()
+        -- Only show lists for current character + objective lists
+        local allLists = MLT:GetLists()
+        local lists = {}
+        local currentChar = MLT.playerFullName
+        for _, list in ipairs(allLists) do
+            if list.listType ~= "character" or list.character == currentChar then
+                table.insert(lists, list)
+            end
+        end
 
         if #lists == 0 then
-            -- No lists, offer to create one
+            -- No lists, offer to create one for current character
             local info = UIDropDownMenu_CreateInfo()
             info.text = L["NEW_LIST"]
             info.notCheckable = true
             info.func = function()
                 MLT:ShowInputDialog(L["ENTER_LIST_NAME"], function(name)
-                    local listID = MLT:CreateList(name, "objective")
+                    local listID = MLT:CreateList(name, "character", MLT.playerFullName)
                     if listID then
-                        MLT:AddItem(listID, itemID)
+                        MLT:AddItem(listID, itemID, source)
                     end
-                end)
+                end, MLT.playerName .. " - BiS")
             end
             UIDropDownMenu_AddButton(info, level)
         else
             -- List existing lists
             for _, list in ipairs(lists) do
                 local info = UIDropDownMenu_CreateInfo()
-                info.text = list.name
+                if list.listType == "farm" then
+                    info.text = "|cff44cc44" .. list.name .. "|r"
+                else
+                    info.text = list.name
+                end
                 info.notCheckable = true
                 info.func = function()
-                    MLT:AddItem(list.id, itemID)
+                    if list.listType == "farm" then
+                        MLT:ShowInputDialog(L["ENTER_TARGET_QTY"], function(qtyInput)
+                            local qty = tonumber(qtyInput) or 1
+                            if qty < 1 then qty = 1 end
+                            MLT:AddFarmItem(list.id, itemID, qty)
+                        end, "20")
+                    else
+                        MLT:AddItem(list.id, itemID, source)
+                    end
                 end
                 UIDropDownMenu_AddButton(info, level)
             end
@@ -125,11 +172,11 @@ function MLT:ShowAddToListMenu(itemID)
             newInfo.notCheckable = true
             newInfo.func = function()
                 MLT:ShowInputDialog(L["ENTER_LIST_NAME"], function(name)
-                    local listID = MLT:CreateList(name, "objective")
+                    local listID = MLT:CreateList(name, "character", MLT.playerFullName)
                     if listID then
-                        MLT:AddItem(listID, itemID)
+                        MLT:AddItem(listID, itemID, source)
                     end
-                end)
+                end, MLT.playerName .. " - BiS")
             end
             UIDropDownMenu_AddButton(newInfo, level)
         end

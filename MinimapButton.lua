@@ -8,7 +8,7 @@ local _, MLT = ...
 ----------------------------------------------
 function MLT:InitMinimapButton()
     local button = CreateFrame("Button", "MLTMinimapButton", Minimap)
-    button:SetSize(32, 32)
+    button:SetSize(31, 31)
     button:SetFrameStrata("MEDIUM")
     button:SetFrameLevel(8)
     button:SetMovable(true)
@@ -16,22 +16,23 @@ function MLT:InitMinimapButton()
 
     -- Icon
     local icon = button:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(20, 20)
-    icon:SetPoint("CENTER")
+    icon:SetSize(18, 18)
+    icon:SetPoint("CENTER", 0, 1)
     icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_10_Blue")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     button.icon = icon
 
-    -- Border (ring)
+    -- Border (ring) - standard minimap button overlay
     local border = button:CreateTexture(nil, "OVERLAY")
-    border:SetSize(54, 54)
-    border:SetPoint("CENTER")
+    border:SetSize(52, 52)
+    border:SetPoint("TOPLEFT")
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
     button.border = border
 
-    -- Background
+    -- Background circle
     local bg = button:CreateTexture(nil, "BACKGROUND")
-    bg:SetSize(24, 24)
-    bg:SetPoint("CENTER")
+    bg:SetSize(20, 20)
+    bg:SetPoint("CENTER", 0, 1)
     bg:SetColorTexture(0, 0, 0, 0.6)
     button.bg = bg
 

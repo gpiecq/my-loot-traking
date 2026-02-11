@@ -50,10 +50,26 @@ function MLT:GetSourceText(source)
 
     local parts = {}
     if source.bossName and source.bossName ~= "" then
-        table.insert(parts, source.bossName)
+        local bossText = source.bossName
+        -- Translate boss name if locale table exists
+        if self.BossLocale and self.BossLocale[bossText] then
+            bossText = self.BossLocale[bossText]
+        end
+        table.insert(parts, bossText)
     end
     if source.instance and source.instance ~= "" then
-        table.insert(parts, source.instance)
+        local instText = source.instance
+        -- Translate instance name if locale table exists
+        if self.InstanceLocale and self.InstanceLocale[instText] then
+            instText = self.InstanceLocale[instText]
+        end
+        -- Add difficulty indicator: (N) Normal, (H) Heroic
+        if source.difficulty == "H" then
+            instText = instText .. " |cffff6600(H)|r"
+        elseif source.difficulty == "N" then
+            instText = instText .. " |cff00ff00(N)|r"
+        end
+        table.insert(parts, instText)
     end
 
     if #parts > 0 then
@@ -119,6 +135,10 @@ end
 ----------------------------------------------
 function MLT:CreateBackdrop(frame, alpha)
     alpha = alpha or 0.85
+    -- Apply BackdropTemplate mixin if SetBackdrop is not available natively
+    if not frame.SetBackdrop and BackdropTemplateMixin then
+        Mixin(frame, BackdropTemplateMixin)
+    end
     frame:SetBackdrop({
         bgFile = "Interface\\Buttons\\WHITE8x8",
         edgeFile = "Interface\\Buttons\\WHITE8x8",
@@ -206,26 +226,33 @@ end
 ----------------------------------------------
 -- Confirmation Dialog
 ----------------------------------------------
-StaticPopupDialogs["MLT_CONFIRM"] = {
-    text = "%s",
-    button1 = "OK",
-    button2 = "Cancel",
-    OnAccept = function() end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-    preferredIndex = 3,
-}
+local confirmDialogID = 0
 
 function MLT:ShowConfirmDialog(text, onAccept)
-    StaticPopupDialogs["MLT_CONFIRM"].text = text
-    StaticPopupDialogs["MLT_CONFIRM"].OnAccept = onAccept
-    StaticPopup_Show("MLT_CONFIRM")
+    confirmDialogID = confirmDialogID + 1
+    local dialogName = "MLT_CONFIRM_" .. confirmDialogID
+
+    StaticPopupDialogs[dialogName] = {
+        text = text,
+        button1 = "OK",
+        button2 = "Cancel",
+        OnAccept = onAccept or function() end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
+    StaticPopup_Show(dialogName)
 end
 
 ----------------------------------------------
 -- Input Dialog
 ----------------------------------------------
+-- Compat: find editBox on dialog (lowercase in old clients, uppercase in Anniversary)
+local function GetPopupEditBox(dialog)
+    return dialog.EditBox or dialog.editBox or _G[dialog:GetName() .. "EditBox"]
+end
+
 StaticPopupDialogs["MLT_INPUT"] = {
     text = "%s",
     button1 = "OK",
@@ -233,16 +260,22 @@ StaticPopupDialogs["MLT_INPUT"] = {
     hasEditBox = true,
     editBoxWidth = 250,
     OnAccept = function(self)
-        local text = self.editBox:GetText()
-        if self.data and self.data.callback then
-            self.data.callback(text)
+        local eb = GetPopupEditBox(self)
+        if eb then
+            local text = eb:GetText()
+            if self.data and self.data.callback then
+                self.data.callback(text)
+            end
         end
     end,
     OnShow = function(self)
-        if self.data and self.data.default then
-            self.editBox:SetText(self.data.default)
+        local eb = GetPopupEditBox(self)
+        if eb then
+            if self.data and self.data.default then
+                eb:SetText(self.data.default)
+            end
+            eb:HighlightText()
         end
-        self.editBox:HighlightText()
     end,
     EditBoxOnEnterPressed = function(self)
         local parent = self:GetParent()
@@ -263,11 +296,61 @@ StaticPopupDialogs["MLT_INPUT"] = {
 
 function MLT:ShowInputDialog(text, callback, default)
     StaticPopupDialogs["MLT_INPUT"].text = text
-    local dialog = StaticPopup_Show("MLT_INPUT")
-    if dialog then
-        dialog.data = {callback = callback, default = default}
-    end
+    StaticPopup_Show("MLT_INPUT", nil, nil, {callback = callback, default = default})
 end
+
+----------------------------------------------
+-- Copy Dialog (read-only editbox for URL copy)
+----------------------------------------------
+StaticPopupDialogs["MLT_COPY"] = {
+    text = "%s",
+    button1 = "OK",
+    hasEditBox = true,
+    editBoxWidth = 300,
+    OnShow = function(self)
+        local eb = GetPopupEditBox(self)
+        if eb and self.data and self.data.url then
+            eb:SetText(self.data.url)
+            eb:HighlightText()
+            eb:SetFocus()
+        end
+    end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+function MLT:ShowCopyDialog(title, url)
+    StaticPopupDialogs["MLT_COPY"].text = title
+    StaticPopup_Show("MLT_COPY", nil, nil, {url = url})
+end
+
+----------------------------------------------
+-- Build Wowhead URL with locale
+----------------------------------------------
+function MLT:GetWowheadURL(itemID)
+    local locale = GetLocale()
+    local lang = ""
+    if locale == "frFR" then
+        lang = "fr/"
+    elseif locale == "deDE" then
+        lang = "de/"
+    elseif locale == "esES" or locale == "esMX" then
+        lang = "es/"
+    elseif locale == "ruRU" then
+        lang = "ru/"
+    elseif locale == "ptBR" then
+        lang = "pt/"
+    elseif locale == "koKR" then
+        lang = "ko/"
+    end
+    return "https://www.wowhead.com/tbc/" .. lang .. "item=" .. itemID
+end
+
 
 ----------------------------------------------
 -- Encode/Decode for import/export

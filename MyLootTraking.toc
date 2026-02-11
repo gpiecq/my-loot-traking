@@ -1,4 +1,4 @@
-## Interface: 20504
+## Interface: 20505
 ## Title: MyLootTraking
 ## Notes: Track loot wishlists across all your characters. Get alerts when items drop!
 ## Notes-frFR: Suivez vos listes de loot sur tous vos personnages. Alertes quand un objet drop !
@@ -20,6 +20,7 @@ Locales\zhTW.lua
 Locales\ptBR.lua
 
 Core.lua
+ItemSources.lua
 Database.lua
 Utils.lua
 LootDetection.lua
@@ -32,5 +33,4 @@ MainFrame.lua
 SearchFrame.lua
 ConfigFrame.lua
 SlashCommands.lua
-ImportExport.lua
 AtlasLootIntegration.lua

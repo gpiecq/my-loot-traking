@@ -17,11 +17,20 @@ function MLT:ShowMainFrame()
     end
     self.mainFrame:Show()
     self:RefreshMainFrame()
+    -- Hide MiniTracker to avoid overlap
+    if self.miniTracker then
+        self.miniTrackerWasShown = self.miniTracker:IsShown()
+        self.miniTracker:Hide()
+    end
 end
 
 function MLT:ToggleMainFrame()
     if self.mainFrame and self.mainFrame:IsShown() then
         self.mainFrame:Hide()
+        -- Restore MiniTracker if it was visible before
+        if self.miniTracker and self.miniTrackerWasShown then
+            self.miniTracker:Show()
+        end
     else
         self:ShowMainFrame()
     end
@@ -45,6 +54,13 @@ function MLT:CreateMainFrame()
     frame:SetScript("OnDragStart", frame.StartMoving)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
     frame:Hide()
+
+    -- Restore MiniTracker when closed (ESC, close button, etc.)
+    frame:SetScript("OnHide", function()
+        if MLT.miniTracker and MLT.miniTrackerWasShown then
+            MLT.miniTracker:Show()
+        end
+    end)
 
     -- ESC to close
     tinsert(UISpecialFrames, "MLTMainFrame")
@@ -133,6 +149,39 @@ function MLT:CreateMainFrame()
     end)
     frame.sortBtn = sortBtn
 
+    -- Add item by ID
+    local addItemBtn = self:CreateCleanButton(toolbar, "+ " .. L["ADD_ITEM_BY_ID"], 80, 22)
+    addItemBtn:SetPoint("LEFT", sortBtn, "RIGHT", 6, 0)
+    addItemBtn:SetScript("OnClick", function()
+        local listID = frame.selectedListID
+        if not listID then
+            self:Print(L["NO_LIST_SELECTED"])
+            return
+        end
+        local list = self.db.lists[listID]
+        local isFarm = list and list.listType == "farm"
+
+        self:ShowInputDialog(L["ENTER_ITEM_ID"], function(input)
+            if not input or input == "" then return end
+            local itemID = tonumber(input) or self:ExtractItemID(input)
+            if itemID then
+                if isFarm then
+                    -- Ask for target quantity
+                    self:ShowInputDialog(L["ENTER_TARGET_QTY"], function(qtyInput)
+                        local qty = tonumber(qtyInput) or 1
+                        if qty < 1 then qty = 1 end
+                        self:AddFarmItem(listID, itemID, qty)
+                    end, "20")
+                else
+                    self:AddItem(listID, itemID)
+                end
+            else
+                self:Print(format(L["ITEM_NOT_FOUND"], input))
+            end
+        end)
+    end)
+    frame.addItemBtn = addItemBtn
+
     -- Toggle obtained category
     local obtainedBtn = self:CreateCleanButton(toolbar, L["SHOW_OBTAINED"], 120, 22)
     obtainedBtn:SetPoint("RIGHT", -8, 0)
@@ -163,76 +212,49 @@ function MLT:CreateMainFrame()
 end
 
 ----------------------------------------------
--- Show New List Dialog
+-- Show New List Dialog (dropdown: Character BiS / Farm)
 ----------------------------------------------
 function MLT:ShowNewListDialog()
     local L = self.L
 
-    -- First ask for list type
     if not self.newListTypeMenu then
         self.newListTypeMenu = CreateFrame("Frame", "MLTNewListTypeMenu", UIParent, "UIDropDownMenuTemplate")
     end
 
     local function InitMenu(self, level)
-        -- Character list
+        -- Character BiS list
         local info = UIDropDownMenu_CreateInfo()
-        info.text = L["LIST_TYPE_CHARACTER"]
+        info.text = L["LIST_TYPE_CHARACTER_SHORT"]
         info.notCheckable = true
         info.func = function()
-            -- Show character selection, then name input
-            MLT:ShowCharacterSelectForNewList()
+            local defaultName = MLT.playerName .. " - BiS"
+            MLT:ShowInputDialog(L["ENTER_LIST_NAME"], function(name)
+                if name and name ~= "" then
+                    MLT:CreateList(name, "character", MLT.playerFullName)
+                    MLT:RefreshMainFrame()
+                end
+            end, defaultName)
         end
         UIDropDownMenu_AddButton(info, level)
 
-        -- Objective list
+        -- Farm list
         info = UIDropDownMenu_CreateInfo()
-        info.text = L["LIST_TYPE_OBJECTIVE"]
+        info.text = "|cff44cc44" .. L["LIST_TYPE_FARM_SHORT"] .. "|r"
         info.notCheckable = true
         info.func = function()
+            local defaultName = "Farm"
             MLT:ShowInputDialog(L["ENTER_LIST_NAME"], function(name)
                 if name and name ~= "" then
-                    MLT:CreateList(name, "objective")
+                    MLT:CreateList(name, "farm")
                     MLT:RefreshMainFrame()
                 end
-            end)
+            end, defaultName)
         end
         UIDropDownMenu_AddButton(info, level)
     end
 
     UIDropDownMenu_Initialize(self.newListTypeMenu, InitMenu, "MENU")
     ToggleDropDownMenu(1, nil, self.newListTypeMenu, "cursor", 0, 0)
-end
-
-----------------------------------------------
--- Character Select for New List
-----------------------------------------------
-function MLT:ShowCharacterSelectForNewList()
-    local L = self.L
-
-    if not self.charSelectMenu then
-        self.charSelectMenu = CreateFrame("Frame", "MLTCharSelectMenu", UIParent, "UIDropDownMenuTemplate")
-    end
-
-    local function InitMenu(self, level)
-        for fullName, charData in pairs(MLT.db.characters) do
-            local info = UIDropDownMenu_CreateInfo()
-            local color = MLT:GetClassColor(charData.class)
-            info.text = format("|cff%02x%02x%02x%s|r", color.r * 255, color.g * 255, color.b * 255, fullName)
-            info.notCheckable = true
-            info.func = function()
-                MLT:ShowInputDialog(L["ENTER_LIST_NAME"], function(name)
-                    if name and name ~= "" then
-                        MLT:CreateList(name, "character", fullName)
-                        MLT:RefreshMainFrame()
-                    end
-                end, charData.name .. " - BiS")
-            end
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end
-
-    UIDropDownMenu_Initialize(self.charSelectMenu, InitMenu, "MENU")
-    ToggleDropDownMenu(1, nil, self.charSelectMenu, "cursor", 0, 0)
 end
 
 ----------------------------------------------
@@ -254,82 +276,193 @@ end
 function MLT:RefreshListPanel()
     local frame = self.mainFrame
     local scrollChild = frame.listScrollChild
+    local currentChar = self.playerFullName
 
-    -- Clear old buttons
-    for _, btn in ipairs(frame.listButtons) do
-        btn:Hide()
-    end
-    frame.listButtons = {}
+    -- Separate lists into: current character + objective, vs other characters
+    local allLists = self:GetLists()
+    local myLists = {}
+    local otherLists = {}
 
-    local lists = self:GetLists()
-    local yOffset = 0
-
-    for i, list in ipairs(lists) do
-        local btn = self:CreateListButton(scrollChild, list, i)
-        btn:SetPoint("TOPLEFT", 4, -yOffset)
-        btn:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
-
-        -- Highlight selected
-        if frame.selectedListID == list.id then
-            btn.bg:SetColorTexture(0.15, 0.3, 0.5, 0.6)
+    for _, list in ipairs(allLists) do
+        if list.listType == "character" and list.character ~= currentChar then
+            table.insert(otherLists, list)
+        else
+            table.insert(myLists, list)
         end
+    end
 
-        table.insert(frame.listButtons, btn)
-        yOffset = yOffset + 32
+    -- Hide all existing section headers
+    frame.listHeaders = frame.listHeaders or {}
+    for _, h in ipairs(frame.listHeaders) do
+        h:Hide()
+    end
+
+    local yOffset = 0
+    local btnIndex = 0
+
+    -- Helper: create or reuse a section header
+    local function ShowSectionHeader(text, headerIndex)
+        if not frame.listHeaders[headerIndex] then
+            local header = CreateFrame("Frame", nil, scrollChild)
+            header:SetSize(LIST_PANEL_WIDTH - 8, 18)
+            header.text = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            header.text:SetPoint("LEFT", 6, 0)
+            header.text:SetTextColor(0.9, 0.8, 0.5)
+            header.line = header:CreateTexture(nil, "ARTWORK")
+            header.line:SetPoint("BOTTOMLEFT", 4, 0)
+            header.line:SetPoint("BOTTOMRIGHT", -4, 0)
+            header.line:SetHeight(1)
+            header.line:SetColorTexture(0.3, 0.25, 0.15, 0.6)
+            frame.listHeaders[headerIndex] = header
+        end
+        local header = frame.listHeaders[headerIndex]
+        header.text:SetText(text)
+        header:ClearAllPoints()
+        header:SetPoint("TOPLEFT", 4, -yOffset)
+        header:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
+        header:Show()
+        yOffset = yOffset + 20
+    end
+
+    -- Helper: render a list of buttons
+    local function RenderLists(lists)
+        for _, list in ipairs(lists) do
+            btnIndex = btnIndex + 1
+            local btn = frame.listButtons[btnIndex]
+            if not btn then
+                btn = self:CreateListButton(scrollChild)
+                frame.listButtons[btnIndex] = btn
+            end
+
+            self:SetupListButton(btn, list)
+            btn:ClearAllPoints()
+            btn:SetPoint("TOPLEFT", 4, -yOffset)
+            btn:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
+
+            if frame.selectedListID == list.id then
+                btn.bg:SetColorTexture(0.15, 0.3, 0.5, 0.6)
+            else
+                btn.bg:SetColorTexture(0.08, 0.08, 0.08, 0.8)
+            end
+
+            btn:Show()
+            yOffset = yOffset + 32
+        end
+    end
+
+    -- Section 1: Current character + objectives
+    local charData = self.db.characters[currentChar]
+    local myTitle = self.L["MY_LISTS"]
+    if charData then
+        myTitle = self:ColorByClass(charData.name, charData.class)
+    end
+    ShowSectionHeader(myTitle, 1)
+    RenderLists(myLists)
+
+    -- Section 2: Other characters (only if any)
+    if #otherLists > 0 then
+        yOffset = yOffset + 6
+        ShowSectionHeader(self.L["OTHER_CHARACTERS"], 2)
+        RenderLists(otherLists)
+    end
+
+    -- Hide extra buttons
+    for i = btnIndex + 1, #frame.listButtons do
+        frame.listButtons[i]:Hide()
     end
 
     scrollChild:SetHeight(math.max(yOffset, 1))
 
     -- Auto-select first list if none selected
-    if not frame.selectedListID and lists[1] then
-        frame.selectedListID = lists[1].id
+    if not frame.selectedListID and myLists[1] then
+        frame.selectedListID = myLists[1].id
         self:RefreshMainFrame()
     end
 end
 
 ----------------------------------------------
--- Create a List Button
+-- Create a List Button (frame only, no content)
 ----------------------------------------------
-function MLT:CreateListButton(parent, list, index)
-    local L = self.L
+function MLT:CreateListButton(parent)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(LIST_PANEL_WIDTH - 8, 30)
     btn:EnableMouse(true)
+    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
     btn.bg = btn:CreateTexture(nil, "BACKGROUND")
     btn.bg:SetAllPoints()
     btn.bg:SetColorTexture(0.08, 0.08, 0.08, 0.8)
 
-    -- List type icon
-    local typeIcon = btn:CreateTexture(nil, "ARTWORK")
-    typeIcon:SetSize(14, 14)
-    typeIcon:SetPoint("LEFT", 4, 0)
-    if list.listType == "character" then
-        typeIcon:SetTexture("Interface\\GLUES\\CharacterCreate\\UI-CharacterCreate-Classes")
-        -- Default warrior icon for simplicity
-        typeIcon:SetTexCoord(0, 0.25, 0, 0.25)
+    btn.typeIcon = btn:CreateTexture(nil, "ARTWORK")
+    btn.typeIcon:SetSize(14, 14)
+    btn.typeIcon:SetPoint("LEFT", 4, 0)
+
+    btn.nameText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.nameText:SetPoint("LEFT", btn.typeIcon, "RIGHT", 4, 6)
+    btn.nameText:SetPoint("RIGHT", btn, "RIGHT", -4, 6)
+    btn.nameText:SetJustifyH("LEFT")
+    btn.nameText:SetWordWrap(false)
+
+    btn.progText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    btn.progText:SetPoint("LEFT", btn.typeIcon, "RIGHT", 4, -6)
+    btn.progText:SetPoint("RIGHT", btn, "RIGHT", -4, -6)
+    btn.progText:SetJustifyH("LEFT")
+    btn.progText:SetTextColor(0.5, 0.7, 0.9)
+    btn.progText:SetScale(0.85)
+
+    btn:SetScript("OnEnter", function(self)
+        if MLT.mainFrame.selectedListID ~= self.listID then
+            self.bg:SetColorTexture(0.12, 0.12, 0.12, 0.9)
+        end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        if MLT.mainFrame.selectedListID ~= self.listID then
+            self.bg:SetColorTexture(0.08, 0.08, 0.08, 0.8)
+        end
+    end)
+
+    return btn
+end
+
+----------------------------------------------
+-- Setup List Button content (reusable)
+----------------------------------------------
+function MLT:SetupListButton(btn, list)
+    local L = self.L
+    btn.listID = list.id
+
+    if list.listType == "character" and list.character then
+        local charData = self.db.characters[list.character]
+        if charData then
+            -- Class icon from the standard class icon atlas
+            btn.typeIcon:SetTexture("Interface\\WorldStateFrame\\Icons-Classes")
+            local coords = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[charData.class]
+            if coords then
+                btn.typeIcon:SetTexCoord(unpack(coords))
+            else
+                btn.typeIcon:SetTexCoord(0, 1, 0, 1)
+            end
+            -- Class-colored character name + list name
+            local coloredName = self:ColorByClass(charData.name, charData.class)
+            btn.nameText:SetText(coloredName .. " |cff888888-|r " .. list.name)
+        else
+            btn.typeIcon:SetTexture("Interface\\GLUES\\CharacterCreate\\UI-CharacterCreate-Classes")
+            btn.typeIcon:SetTexCoord(0, 0.25, 0, 0.25)
+            btn.nameText:SetText(list.name)
+        end
+    elseif list.listType == "farm" then
+        btn.typeIcon:SetTexture("Interface\\Icons\\INV_Misc_Bag_10")
+        btn.typeIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        btn.nameText:SetText("|cff44cc44" .. list.name .. "|r")
     else
-        typeIcon:SetTexture("Interface\\Icons\\INV_Scroll_03")
-        typeIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        btn.typeIcon:SetTexture("Interface\\Icons\\INV_Scroll_03")
+        btn.typeIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        btn.nameText:SetText(list.name)
     end
 
-    -- List name
-    local name = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    name:SetPoint("LEFT", typeIcon, "RIGHT", 4, 2)
-    name:SetPoint("RIGHT", -4, 2)
-    name:SetJustifyH("LEFT")
-    name:SetText(list.name)
-    name:SetWordWrap(false)
-
-    -- Progress
     local obtained, total, percent = self:GetListProgress(list.id)
-    local prog = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    prog:SetPoint("BOTTOMLEFT", typeIcon, "BOTTOMRIGHT", 4, -2)
-    prog:SetTextColor(0.5, 0.7, 0.9)
-    prog:SetText(format(L["PROGRESS"], obtained, total, percent))
-    prog:SetScale(0.85)
+    btn.progText:SetText(format(L["PROGRESS"], obtained, total, percent))
 
-    -- Click to select
     btn:SetScript("OnClick", function(self, button)
         if button == "LeftButton" then
             MLT.mainFrame.selectedListID = list.id
@@ -338,18 +471,6 @@ function MLT:CreateListButton(parent, list, index)
             MLT:ShowListContextMenu(list.id)
         end
     end)
-    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-
-    btn:SetScript("OnEnter", function(self)
-        self.bg:SetColorTexture(0.12, 0.12, 0.12, 0.9)
-    end)
-    btn:SetScript("OnLeave", function(self)
-        if MLT.mainFrame.selectedListID ~= list.id then
-            self.bg:SetColorTexture(0.08, 0.08, 0.08, 0.8)
-        end
-    end)
-
-    return btn
 end
 
 ----------------------------------------------
@@ -376,15 +497,6 @@ function MLT:ShowListContextMenu(listID)
                     MLT:RenameList(listID, name)
                 end
             end, list.name)
-        end
-        UIDropDownMenu_AddButton(info, level)
-
-        -- Import/Export
-        info = UIDropDownMenu_CreateInfo()
-        info.text = L["IMPORT_EXPORT"]
-        info.notCheckable = true
-        info.func = function()
-            MLT:ShowImportExportFrame(listID)
         end
         UIDropDownMenu_AddButton(info, level)
 
@@ -420,11 +532,16 @@ function MLT:RefreshItemPanel()
     local scrollChild = frame.itemScrollChild
     local L = self.L
 
-    -- Clear old rows
+    -- Hide all existing rows
     for _, row in ipairs(frame.itemRows) do
         row:Hide()
     end
-    frame.itemRows = {}
+
+    -- Hide all existing headers
+    frame.headerPool = frame.headerPool or {}
+    for _, h in ipairs(frame.headerPool) do
+        h:Hide()
+    end
 
     local listID = frame.selectedListID
     if not listID or not self.db.lists[listID] then
@@ -432,17 +549,34 @@ function MLT:RefreshItemPanel()
     end
 
     local list = self.db.lists[listID]
-    local items = {}
+    local filter = frame.currentFilter
 
-    -- Separate into needed and obtained
+    -- Separate into needed and obtained, applying active filter
     local neededItems = {}
     local obtainedItems = {}
 
     for _, item in ipairs(list.items) do
-        if item.obtained then
-            table.insert(obtainedItems, item)
-        else
-            table.insert(neededItems, item)
+        local passesFilter = true
+        if filter then
+            if filter.type == "character" then
+                passesFilter = (item.assignedTo == filter.value)
+            elseif filter.type == "instance" then
+                local inst = item.source and item.source.instance
+                if filter.value == nil then
+                    -- "No source" filter: items without an instance
+                    passesFilter = not inst or inst == ""
+                else
+                    passesFilter = (inst == filter.value)
+                end
+            end
+        end
+
+        if passesFilter then
+            if item.obtained then
+                table.insert(obtainedItems, item)
+            else
+                table.insert(neededItems, item)
+            end
         end
     end
 
@@ -452,141 +586,137 @@ function MLT:RefreshItemPanel()
     table.sort(obtainedItems, sortFunc)
 
     local yOffset = 0
+    local rowIndex = 0
 
     -- Category header: Needed
-    local neededHeader = self:CreateCategoryHeader(scrollChild, L["CATEGORY_NEEDED"] .. " (" .. #neededItems .. ")")
+    local neededHeader = self:AcquireHeader(scrollChild, 1)
+    neededHeader.label:SetText(self.ADDON_COLOR .. L["CATEGORY_NEEDED"] .. " (" .. #neededItems .. ")|r")
+    neededHeader:ClearAllPoints()
     neededHeader:SetPoint("TOPLEFT", 8, -yOffset)
-    table.insert(frame.itemRows, neededHeader)
+    neededHeader:Show()
     yOffset = yOffset + 24
 
     -- Needed items
     for i, item in ipairs(neededItems) do
-        local row = self:CreateItemRow(scrollChild, item, listID, i)
+        rowIndex = rowIndex + 1
+        local row = frame.itemRows[rowIndex]
+        if not row then
+            row = self:CreateItemRow(scrollChild)
+            frame.itemRows[rowIndex] = row
+        end
+        self:SetupItemRow(row, item, listID, i, false)
+        row:ClearAllPoints()
         row:SetPoint("TOPLEFT", 4, -yOffset)
-        table.insert(frame.itemRows, row)
+        row:Show()
         yOffset = yOffset + ITEM_ROW_HEIGHT
     end
 
     -- Category header: Obtained (if showing)
     if self.db.config.showObtained and #obtainedItems > 0 then
         yOffset = yOffset + 8
-        local obtainedHeader = self:CreateCategoryHeader(scrollChild, L["CATEGORY_OBTAINED"] .. " (" .. #obtainedItems .. ")")
+        local obtainedHeader = self:AcquireHeader(scrollChild, 2)
+        obtainedHeader.label:SetText(self.ADDON_COLOR .. L["CATEGORY_OBTAINED"] .. " (" .. #obtainedItems .. ")|r")
+        obtainedHeader:ClearAllPoints()
         obtainedHeader:SetPoint("TOPLEFT", 8, -yOffset)
-        table.insert(frame.itemRows, obtainedHeader)
+        obtainedHeader:Show()
         yOffset = yOffset + 24
 
         for i, item in ipairs(obtainedItems) do
-            local row = self:CreateItemRow(scrollChild, item, listID, i, true)
+            rowIndex = rowIndex + 1
+            local row = frame.itemRows[rowIndex]
+            if not row then
+                row = self:CreateItemRow(scrollChild)
+                frame.itemRows[rowIndex] = row
+            end
+            self:SetupItemRow(row, item, listID, i, true)
+            row:ClearAllPoints()
             row:SetPoint("TOPLEFT", 4, -yOffset)
-            table.insert(frame.itemRows, row)
+            row:Show()
             yOffset = yOffset + ITEM_ROW_HEIGHT
         end
+    end
+
+    -- Hide extra rows
+    for i = rowIndex + 1, #frame.itemRows do
+        frame.itemRows[i]:Hide()
     end
 
     scrollChild:SetHeight(math.max(yOffset + 10, 1))
 end
 
 ----------------------------------------------
--- Create Category Header
+-- Acquire Category Header (pooled)
 ----------------------------------------------
-function MLT:CreateCategoryHeader(parent, text)
-    local header = CreateFrame("Frame", nil, parent)
-    header:SetSize(FRAME_WIDTH - LIST_PANEL_WIDTH - 30, 22)
+function MLT:AcquireHeader(parent, index)
+    local frame = self.mainFrame
+    frame.headerPool = frame.headerPool or {}
 
-    local label = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    label:SetPoint("LEFT")
-    label:SetText(self.ADDON_COLOR .. text .. "|r")
+    if not frame.headerPool[index] then
+        local header = CreateFrame("Frame", nil, parent)
+        header:SetSize(FRAME_WIDTH - LIST_PANEL_WIDTH - 30, 22)
 
-    local line = header:CreateTexture(nil, "ARTWORK")
-    line:SetPoint("LEFT", label, "RIGHT", 8, 0)
-    line:SetPoint("RIGHT")
-    line:SetHeight(1)
-    line:SetColorTexture(0.2, 0.2, 0.2, 1)
+        header.label = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        header.label:SetPoint("LEFT")
 
-    return header
+        header.line = header:CreateTexture(nil, "ARTWORK")
+        header.line:SetPoint("LEFT", header.label, "RIGHT", 8, 0)
+        header.line:SetPoint("RIGHT")
+        header.line:SetHeight(1)
+        header.line:SetColorTexture(0.2, 0.2, 0.2, 1)
+
+        frame.headerPool[index] = header
+    end
+
+    return frame.headerPool[index]
 end
 
 ----------------------------------------------
--- Create Item Row
+-- Create Item Row (frame structure only, no content)
 ----------------------------------------------
-function MLT:CreateItemRow(parent, item, listID, index, isObtained)
+function MLT:CreateItemRow(parent)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(FRAME_WIDTH - LIST_PANEL_WIDTH - 30, ITEM_ROW_HEIGHT)
     row:EnableMouse(true)
 
-    -- Background (subtle hover)
     row.bg = row:CreateTexture(nil, "BACKGROUND")
     row.bg:SetAllPoints()
     row.bg:SetColorTexture(0.08, 0.08, 0.08, 0)
 
-    -- Icon
-    local icon = row:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(28, 28)
-    icon:SetPoint("LEFT", 6, 0)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    icon:SetTexture(item.itemTexture or "Interface\\Icons\\INV_Misc_QuestionMark")
-    if isObtained then
-        icon:SetDesaturated(true)
-        icon:SetAlpha(0.5)
-    end
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetSize(28, 28)
+    row.icon:SetPoint("LEFT", 6, 0)
+    row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    -- Item name (colored by quality)
-    local name = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    name:SetPoint("LEFT", icon, "RIGHT", 8, 4)
-    name:SetWidth(200)
-    name:SetJustifyH("LEFT")
-    name:SetWordWrap(false)
-    local nameText = self:FormatItemWithColor(item.itemName, item.itemQuality)
-    if isObtained then
-        nameText = "|cff666666" .. (item.itemName or "?") .. "|r"
-    end
-    name:SetText(nameText)
+    row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    row.nameText:SetPoint("LEFT", row.icon, "RIGHT", 8, 4)
+    row.nameText:SetWidth(200)
+    row.nameText:SetJustifyH("LEFT")
+    row.nameText:SetWordWrap(false)
 
-    -- Source
-    local source = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    source:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 8, -4)
-    source:SetTextColor(0.6, 0.6, 0.6)
-    source:SetText(self:GetSourceText(item.source))
+    row.sourceText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.sourceText:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 8, -4)
+    row.sourceText:SetTextColor(0.6, 0.6, 0.6)
 
-    -- Stats (boss kills)
-    local stats = self:GetItemStatistics(item)
-    if stats.bossKillsText then
-        local statText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        statText:SetPoint("RIGHT", -8, 6)
-        statText:SetTextColor(0.5, 0.5, 0.5)
-        statText:SetText(stats.bossKillsText)
-    end
+    row.statText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.statText:SetPoint("RIGHT", -8, 6)
+    row.statText:SetTextColor(0.5, 0.5, 0.5)
 
-    -- Assigned character
-    if item.assignedTo then
-        local charData = self.db.characters[item.assignedTo]
-        local assignText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        assignText:SetPoint("RIGHT", -8, -6)
-        if charData then
-            assignText:SetText(self:ColorByClass(charData.name, charData.class))
-        else
-            assignText:SetText(item.assignedTo)
-            assignText:SetTextColor(0.7, 0.7, 0.7)
-        end
-    end
+    row.assignText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.assignText:SetPoint("RIGHT", -8, -6)
 
-    -- Note indicator
-    if item.note and item.note ~= "" then
-        local noteIcon = row:CreateTexture(nil, "OVERLAY")
-        noteIcon:SetSize(12, 12)
-        noteIcon:SetPoint("RIGHT", -120, 0)
-        noteIcon:SetTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
-    end
+    row.noteIcon = row:CreateTexture(nil, "OVERLAY")
+    row.noteIcon:SetSize(12, 12)
+    row.noteIcon:SetPoint("RIGHT", -120, 0)
+    row.noteIcon:SetTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
 
-    -- Tooltip on hover
     row:SetScript("OnEnter", function(self)
         self.bg:SetColorTexture(0.15, 0.15, 0.15, 0.5)
-        if item.itemLink or item.itemID then
+        if self.currentItemLink or self.currentItemID then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            if item.itemLink then
-                GameTooltip:SetHyperlink(item.itemLink)
+            if self.currentItemLink then
+                GameTooltip:SetHyperlink(self.currentItemLink)
             else
-                GameTooltip:SetHyperlink("item:" .. item.itemID)
+                GameTooltip:SetHyperlink("item:" .. self.currentItemID)
             end
             GameTooltip:Show()
         end
@@ -596,14 +726,85 @@ function MLT:CreateItemRow(parent, item, listID, index, isObtained)
         GameTooltip:Hide()
     end)
 
-    -- Right-click context menu
+    return row
+end
+
+----------------------------------------------
+-- Setup Item Row content (reusable)
+----------------------------------------------
+function MLT:SetupItemRow(row, item, listID, index, isObtained)
+    row.currentItemLink = item.itemLink
+    row.currentItemID = item.itemID
+
+    row.icon:SetTexture(item.itemTexture or "Interface\\Icons\\INV_Misc_QuestionMark")
+    row.icon:SetDesaturated(isObtained or false)
+    row.icon:SetAlpha(isObtained and 0.5 or 1)
+
+    if isObtained then
+        row.nameText:SetText("|cff666666" .. (item.itemName or "?") .. "|r")
+    else
+        row.nameText:SetText(self:FormatItemWithColor(item.itemName, item.itemQuality))
+    end
+
+    -- Check if this is a farm list item
+    local list = self.db.lists[listID]
+    local isFarmItem = list and list.listType == "farm"
+
+    if isFarmItem then
+        local cur = item.currentQty or 0
+        local tgt = item.targetQty or 1
+        local farmColor = cur >= tgt and "|cff00ff00" or "|cffffff00"
+        row.sourceText:SetText(farmColor .. format(self.L["FARM_PROGRESS"], cur, tgt) .. "|r")
+        row.sourceIsUnknown = false
+    else
+        local sourceDisplay = self:GetSourceText(item.source)
+        row.sourceIsUnknown = false
+        if sourceDisplay == self.L["SOURCE_UNKNOWN"] then
+            sourceDisplay = "|cff4488cc[Wowhead]|r"
+            row.sourceIsUnknown = true
+        end
+        row.sourceText:SetText(sourceDisplay)
+    end
+
+    -- Stats
+    local stats = self:GetItemStatistics(item)
+    if stats.bossKillsText and not isFarmItem then
+        row.statText:SetText(stats.bossKillsText)
+        row.statText:Show()
+    else
+        row.statText:SetText("")
+        row.statText:Hide()
+    end
+
+    -- Assigned character
+    if item.assignedTo then
+        local charData = self.db.characters[item.assignedTo]
+        if charData then
+            row.assignText:SetText(self:ColorByClass(charData.name, charData.class))
+        else
+            row.assignText:SetText(item.assignedTo)
+            row.assignText:SetTextColor(0.7, 0.7, 0.7)
+        end
+        row.assignText:Show()
+    else
+        row.assignText:SetText("")
+        row.assignText:Hide()
+    end
+
+    -- Note indicator
+    row.noteIcon:SetShown(item.note and item.note ~= "")
+
+    -- Mouse click handlers
     row:SetScript("OnMouseDown", function(self, button)
         if button == "RightButton" then
             MLT:ShowItemContextMenu(listID, item.itemID)
+        elseif button == "LeftButton" and self.sourceIsUnknown then
+            local url = MLT:GetWowheadURL(item.itemID)
+            MLT:ShowCopyDialog(MLT.L["WOWHEAD_URL_TITLE"], url)
         end
     end)
 
-    -- Drag and drop for reordering
+    -- Drag and drop
     row:SetScript("OnMouseUp", function(self, button)
         if button == "LeftButton" and MLT.mainFrame.dragIndex then
             local targetIndex = index
@@ -614,8 +815,6 @@ function MLT:CreateItemRow(parent, item, listID, index, isObtained)
             end
         end
     end)
-
-    return row
 end
 
 ----------------------------------------------
@@ -662,35 +861,75 @@ function MLT:ShowFilterMenu()
         self.filterMenu = CreateFrame("Frame", "MLTFilterMenu", UIParent, "UIDropDownMenuTemplate")
     end
 
-    local function InitMenu(self, level)
+    local function InitMenu(frame, level, menuList)
         local info
 
-        -- All
-        info = UIDropDownMenu_CreateInfo()
-        info.text = L["FILTER_ALL"]
-        info.notCheckable = true
-        info.func = function()
-            MLT.mainFrame.currentFilter = nil
-            MLT.mainFrame.filterBtn.text:SetText(L["FILTER_ALL"])
-            MLT:RefreshMainFrame()
+        if level == 1 then
+            -- All
+            info = UIDropDownMenu_CreateInfo()
+            info.text = L["FILTER_ALL"]
+            info.notCheckable = true
+            info.func = function()
+                MLT.mainFrame.currentFilter = nil
+                MLT.mainFrame.filterBtn.text:SetText(L["FILTER_ALL"])
+                MLT:RefreshMainFrame()
+            end
+            UIDropDownMenu_AddButton(info, level)
+
+            -- By Instance
+            info = UIDropDownMenu_CreateInfo()
+            info.text = L["FILTER_BY_INSTANCE"]
+            info.notCheckable = true
+            info.hasArrow = true
+            info.menuList = "instance"
+            UIDropDownMenu_AddButton(info, level)
+
+        elseif level == 2 and menuList == "instance" then
+            -- Collect unique instances from the current list's items
+            local listID = MLT.mainFrame.selectedListID
+            local instances = {}
+            local seen = {}
+            if listID and MLT.db.lists[listID] then
+                for _, item in ipairs(MLT.db.lists[listID].items) do
+                    local inst = item.source and item.source.instance
+                    if inst and inst ~= "" and not seen[inst] then
+                        seen[inst] = true
+                        -- Translate for display
+                        local displayName = inst
+                        if MLT.InstanceLocale and MLT.InstanceLocale[inst] then
+                            displayName = MLT.InstanceLocale[inst]
+                        end
+                        table.insert(instances, {raw = inst, display = displayName})
+                    end
+                end
+            end
+            table.sort(instances, function(a, b) return a.display < b.display end)
+
+            -- No source
+            info = UIDropDownMenu_CreateInfo()
+            info.text = L["SOURCE_UNKNOWN"]
+            info.notCheckable = true
+            info.func = function()
+                MLT.mainFrame.currentFilter = {type = "instance", value = nil}
+                MLT.mainFrame.filterBtn.text:SetText(L["SOURCE_UNKNOWN"])
+                MLT:RefreshMainFrame()
+                CloseDropDownMenus()
+            end
+            UIDropDownMenu_AddButton(info, level)
+
+            for _, inst in ipairs(instances) do
+                info = UIDropDownMenu_CreateInfo()
+                info.text = inst.display
+                info.notCheckable = true
+                info.func = function()
+                    MLT.mainFrame.currentFilter = {type = "instance", value = inst.raw}
+                    MLT.mainFrame.filterBtn.text:SetText(inst.display)
+                    MLT:RefreshMainFrame()
+                    CloseDropDownMenus()
+                end
+                UIDropDownMenu_AddButton(info, level)
+            end
         end
-        UIDropDownMenu_AddButton(info, level)
-
-        -- By Character
-        info = UIDropDownMenu_CreateInfo()
-        info.text = L["FILTER_BY_CHARACTER"]
-        info.notCheckable = true
-        info.hasArrow = true
-        info.menuList = "character"
-        UIDropDownMenu_AddButton(info, level)
-
-        -- By Source Type
-        info = UIDropDownMenu_CreateInfo()
-        info.text = L["FILTER_BY_SOURCE"]
-        info.notCheckable = true
-        info.hasArrow = true
-        info.menuList = "source"
-        UIDropDownMenu_AddButton(info, level)
     end
 
     UIDropDownMenu_Initialize(self.filterMenu, InitMenu, "MENU")

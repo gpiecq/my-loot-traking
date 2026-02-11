@@ -30,11 +30,11 @@ MLT.QUALITY_HEX = {
 MLT.ADDON_COLOR = "|cff00ccff"
 MLT.ADDON_COLOR_RGB = {r = 0, g = 0.8, b = 1}
 
--- Sound files
+-- Sound Kit IDs (more reliable than file paths in Classic)
 MLT.SOUNDS = {
-    GROUP_DROP = "Sound\\Interface\\RaidWarning.ogg",
-    PERSONAL_LOOT = "Sound\\Interface\\LevelUp.ogg",
-    DUNGEON_ENTER = "Sound\\Interface\\MapPing.ogg",
+    GROUP_DROP = 8959,    -- RaidWarning
+    PERSONAL_LOOT = 888,  -- LevelUp
+    DUNGEON_ENTER = 3175, -- MapPing
 }
 
 ----------------------------------------------
@@ -90,6 +90,12 @@ function MLT:PLAYER_LOGIN()
     -- Register additional events
     self.frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     self.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    self.frame:RegisterEvent("BAG_UPDATE")
+
+    -- Build item source database (EJ + AtlasLoot data) after a short delay
+    C_Timer.After(5, function()
+        self:BuildItemSourceDB()
+    end)
 
     -- Print loaded message
     local L = self.L
@@ -114,6 +120,20 @@ function MLT:PLAYER_ENTERING_WORLD()
 end
 
 ----------------------------------------------
+-- BAG_UPDATE: Sync farm items from bags (debounced)
+----------------------------------------------
+function MLT:BAG_UPDATE()
+    -- Debounce: only sync once per second
+    if self.bagUpdateTimer then return end
+    self.bagUpdateTimer = C_Timer.After(1, function()
+        self.bagUpdateTimer = nil
+        if self.SyncFarmItemsFromBags then
+            self:SyncFarmItemsFromBags()
+        end
+    end)
+end
+
+----------------------------------------------
 -- Utility: Print
 ----------------------------------------------
 function MLT:Print(msg)
@@ -127,14 +147,18 @@ function MLT:GetAllTrackedItemIDs()
     local tracked = {}
     if not self.db or not self.db.lists then return tracked end
 
-    for _, list in pairs(self.db.lists) do
+    for listID, list in pairs(self.db.lists) do
         for _, item in ipairs(list.items) do
             if not item.obtained then
                 tracked[item.itemID] = tracked[item.itemID] or {}
                 table.insert(tracked[item.itemID], {
+                    listID = listID,
                     listName = list.name,
+                    listType = list.listType,
                     assignedTo = item.assignedTo,
                     note = item.note,
+                    targetQty = item.targetQty,
+                    currentQty = item.currentQty,
                 })
             end
         end
@@ -176,7 +200,10 @@ function MLT:CheckDungeonEntry()
     local _, instanceType = IsInInstance()
     if instanceType ~= "party" and instanceType ~= "raid" then return end
 
-    local zoneName = GetRealZoneText() or GetSubZoneText() or ""
+    local zoneName = GetRealZoneText()
+    if not zoneName or zoneName == "" then
+        zoneName = GetSubZoneText() or ""
+    end
     if zoneName == "" then return end
 
     -- Avoid repeating alert for same zone

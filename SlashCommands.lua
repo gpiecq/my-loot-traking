@@ -43,8 +43,11 @@ function MLT:HandleSlashCommand(msg)
     elseif cmd == "config" or cmd == "settings" or cmd == "options" then
         self:ToggleConfigFrame()
 
+    elseif cmd == "debugsource" then
+        self:DebugSourceInfo()
+
     else
-        self:Print("Unknown command: " .. cmd)
+        self:Print(format(L["UNKNOWN_COMMAND"], cmd))
         self:PrintHelp()
     end
 end
@@ -69,14 +72,13 @@ function MLT:HandleAddCommand(args)
     local L = self.L
 
     if args == "" then
-        -- Try to get item from current target's loot or cursor
-        self:Print("Usage: /mlt add [itemID or item link]")
+        self:Print(L["ADD_USAGE"])
         return
     end
 
     local itemID = self:ExtractItemID(args)
     if not itemID then
-        self:Print("Could not find item: " .. args)
+        self:Print(format(L["ITEM_NOT_FOUND"], args))
         return
     end
 

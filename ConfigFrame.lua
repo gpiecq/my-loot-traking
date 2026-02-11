@@ -144,8 +144,8 @@ function MLT:CreateConfigFrame()
     local resetBtn = self:CreateCleanButton(scrollChild, L["RESET"] .. " " .. L["SETTINGS"], 150, 26)
     resetBtn:SetPoint("TOPLEFT", 16, yOffset)
     resetBtn:SetScript("OnClick", function()
-        self:ShowConfirmDialog("Reset all settings to defaults?", function()
-            -- Reset config to defaults
+        self:ShowConfirmDialog(L["RESET_CONFIRM"], function()
+            -- Reset config to defaults (including positions)
             self.db.config = {
                 enablePopup = true,
                 enableSound = true,
@@ -157,6 +157,8 @@ function MLT:CreateConfigFrame()
                 trackerScale = 1.0,
                 trackerLocked = false,
                 alertsLocked = false,
+                trackerPoint = nil,
+                alertPoint = nil,
                 showObtained = false,
                 minimapPos = 220,
             }
@@ -279,6 +281,13 @@ function MLT:RegisterInterfaceOptions()
         MLT:ShowConfigFrame()
     end)
 
-    InterfaceOptions_AddCategory(panel)
+    -- WoW Anniversary Edition uses Settings API
+    if Settings and Settings.RegisterCanvasLayoutCategory then
+        local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+        Settings.RegisterAddOnCategory(category)
+        self.settingsCategory = category
+    elseif InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(panel)
+    end
     self.blizzPanel = panel
 end

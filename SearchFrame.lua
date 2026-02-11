@@ -163,11 +163,10 @@ function MLT:DisplaySearchResults(results)
     local frame = self.searchFrame
     local scrollChild = frame.resultScrollChild
 
-    -- Clear old rows
+    -- Hide all existing rows
     for _, row in ipairs(frame.resultRows) do
         row:Hide()
     end
-    frame.resultRows = {}
 
     if #results == 0 then
         frame.noResults:Show()
@@ -176,54 +175,70 @@ function MLT:DisplaySearchResults(results)
     frame.noResults:Hide()
 
     local yOffset = 0
+    local rowIndex = 0
     for i, item in ipairs(results) do
         local itemID = item.itemID
         local itemName, itemLink, itemQuality, _, _, _, _, _, _, itemTexture = GetItemInfo(itemID)
 
         if itemName then
-            local row = CreateFrame("Frame", nil, scrollChild)
-            row:SetSize(SEARCH_WIDTH - 40, RESULT_ROW_HEIGHT)
-            row:SetPoint("TOPLEFT", 4, -yOffset)
-            row:EnableMouse(true)
+            rowIndex = rowIndex + 1
+            local row = frame.resultRows[rowIndex]
 
-            row.bg = row:CreateTexture(nil, "BACKGROUND")
-            row.bg:SetAllPoints()
-            row.bg:SetColorTexture(0.08, 0.08, 0.08, 0)
+            if not row then
+                -- Create new row only if needed
+                row = CreateFrame("Frame", nil, scrollChild)
+                row:SetSize(SEARCH_WIDTH - 40, RESULT_ROW_HEIGHT)
+                row:EnableMouse(true)
 
-            -- Icon
-            local icon = row:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(24, 24)
-            icon:SetPoint("LEFT", 4, 0)
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            icon:SetTexture(itemTexture)
+                row.bg = row:CreateTexture(nil, "BACKGROUND")
+                row.bg:SetAllPoints()
+                row.bg:SetColorTexture(0.08, 0.08, 0.08, 0)
 
-            -- Name
-            local name = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            name:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-            name:SetText(self:FormatItemWithColor(itemName, itemQuality))
+                row.icon = row:CreateTexture(nil, "ARTWORK")
+                row.icon:SetSize(24, 24)
+                row.icon:SetPoint("LEFT", 4, 0)
+                row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-            -- Add button
-            local addBtn = self:CreateCleanButton(row, "+", 24, 24)
-            addBtn:SetPoint("RIGHT", -4, 0)
-            addBtn:SetScript("OnClick", function()
+                row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                row.nameText:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+
+                row.addBtn = self:CreateCleanButton(row, "+", 24, 24)
+                row.addBtn:SetPoint("RIGHT", -4, 0)
+
+                row:SetScript("OnEnter", function(self)
+                    self.bg:SetColorTexture(0.12, 0.12, 0.12, 0.5)
+                    if self.currentLink then
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:SetHyperlink(self.currentLink)
+                        GameTooltip:Show()
+                    end
+                end)
+                row:SetScript("OnLeave", function(self)
+                    self.bg:SetColorTexture(0.08, 0.08, 0.08, 0)
+                    GameTooltip:Hide()
+                end)
+
+                frame.resultRows[rowIndex] = row
+            end
+
+            -- Update content
+            row.icon:SetTexture(itemTexture)
+            row.nameText:SetText(self:FormatItemWithColor(itemName, itemQuality))
+            row.currentLink = itemLink or ("item:" .. itemID)
+            row.addBtn:SetScript("OnClick", function()
                 self:ShowAddToListMenu(itemID)
             end)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", 4, -yOffset)
+            row:Show()
 
-            -- Hover tooltip
-            row:SetScript("OnEnter", function(self)
-                self.bg:SetColorTexture(0.12, 0.12, 0.12, 0.5)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetHyperlink(itemLink or ("item:" .. itemID))
-                GameTooltip:Show()
-            end)
-            row:SetScript("OnLeave", function(self)
-                self.bg:SetColorTexture(0.08, 0.08, 0.08, 0)
-                GameTooltip:Hide()
-            end)
-
-            table.insert(frame.resultRows, row)
             yOffset = yOffset + RESULT_ROW_HEIGHT
         end
+    end
+
+    -- Hide extra rows
+    for i = rowIndex + 1, #frame.resultRows do
+        frame.resultRows[i]:Hide()
     end
 
     scrollChild:SetHeight(math.max(yOffset, 1))

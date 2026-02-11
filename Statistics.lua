@@ -63,3 +63,42 @@ function MLT:GetOverallStatistics()
         progressText = format(self.L["PROGRESS"], totalObtained, totalItems, percent),
     }
 end
+
+----------------------------------------------
+-- Get statistics for a specific character
+-- Includes character lists matching charKey + all objective lists
+----------------------------------------------
+function MLT:GetCharacterStatistics(charKey)
+    local totalItems = 0
+    local totalObtained = 0
+    local totalLists = 0
+
+    for _, list in pairs(self.db.lists) do
+        local include = false
+        if list.listType == "character" then
+            include = (list.character == charKey)
+        else
+            include = true
+        end
+
+        if include then
+            totalLists = totalLists + 1
+            for _, item in ipairs(list.items) do
+                totalItems = totalItems + 1
+                if item.obtained then
+                    totalObtained = totalObtained + 1
+                end
+            end
+        end
+    end
+
+    local percent = totalItems > 0 and math.floor((totalObtained / totalItems) * 100) or 0
+
+    return {
+        totalLists = totalLists,
+        totalItems = totalItems,
+        totalObtained = totalObtained,
+        percent = percent,
+        progressText = format(self.L["PROGRESS"], totalObtained, totalItems, percent),
+    }
+end
