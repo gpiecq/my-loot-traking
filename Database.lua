@@ -683,33 +683,118 @@ function MLT:GetListProgress(listID)
 end
 
 ----------------------------------------------
--- Auto-detect obtained items (scan bags)
+-- Auto-detect obtained items (scan bags + bank)
 ----------------------------------------------
-function MLT:ScanBagsForItems()
-    local found = {}
+
+-- Internal: scan a range of container IDs and merge into 'found' table
+local function ScanContainerRange(found, startBag, endBag)
     local _GetContainerNumSlots = C_Container and C_Container.GetContainerNumSlots or GetContainerNumSlots
     local _GetContainerItemID = C_Container and C_Container.GetContainerItemID or GetContainerItemID
     local _GetContainerItemInfo = C_Container and C_Container.GetContainerItemInfo or GetContainerItemInfo
 
-    for bag = 0, 4 do
+    for bag = startBag, endBag do
         local numSlots = _GetContainerNumSlots(bag)
-        for slot = 1, numSlots do
-            local itemID = _GetContainerItemID(bag, slot)
-            if itemID then
-                local info = _GetContainerItemInfo(bag, slot)
-                local itemCount = 1
-                if type(info) == "table" then
-                    itemCount = info.stackCount or 1
-                elseif type(info) == "number" then
-                    -- Old API: returns texture, itemCount, ...
-                    local _, count = _GetContainerItemInfo(bag, slot)
-                    itemCount = count or 1
+        if numSlots and numSlots > 0 then
+            for slot = 1, numSlots do
+                local itemID = _GetContainerItemID(bag, slot)
+                if itemID then
+                    local info = _GetContainerItemInfo(bag, slot)
+                    local itemCount = 1
+                    if type(info) == "table" then
+                        itemCount = info.stackCount or 1
+                    elseif type(info) == "number" then
+                        local _, count = _GetContainerItemInfo(bag, slot)
+                        itemCount = count or 1
+                    end
+                    found[itemID] = (found[itemID] or 0) + itemCount
                 end
-                found[itemID] = (found[itemID] or 0) + itemCount
             end
         end
     end
+end
+
+function MLT:ScanBagsForItems()
+    local found = {}
+    ScanContainerRange(found, 0, 4)
     return found
+end
+
+-- Scan bank containers (main bank slot -1, bank bags 5-11)
+function MLT:ScanBankForItems()
+    local found = {}
+    -- Main bank container (BANK_CONTAINER = -1)
+    ScanContainerRange(found, -1, -1)
+    -- Bank bags: NUM_BAG_SLOTS+1 to NUM_BAG_SLOTS+NUM_BANKBAGSLOTS (5-11)
+    local firstBankBag = (NUM_BAG_SLOTS or 4) + 1
+    local lastBankBag = firstBankBag + (NUM_BANKBAGSLOTS or 7) - 1
+    ScanContainerRange(found, firstBankBag, lastBankBag)
+    return found
+end
+
+-- Cache bank contents (persisted across bank close)
+MLT.bankItemCache = {}
+
+function MLT:UpdateBankCache()
+    self.bankItemCache = self:ScanBankForItems()
+end
+
+-- Called after bank cache changes to resync lastBagCount baselines.
+-- Only bumps currentQty if combined total exceeds it (first-time bank discovery).
+function MLT:OnBankCacheUpdated()
+    local bagItems = self:ScanBagsAndBankForItems()
+    local changed = false
+
+    for _, list in pairs(self.db.lists) do
+        if list.listType == "farm" then
+            for _, item in ipairs(list.items) do
+                local combinedCount = bagItems[item.itemID] or 0
+                -- If combined > currentQty, we discovered bank items not yet counted
+                if combinedCount > (item.currentQty or 0) then
+                    item.currentQty = combinedCount
+                    if item.targetQty and item.currentQty >= item.targetQty then
+                        item.obtained = true
+                        item.obtainedDate = item.obtainedDate or time()
+                    end
+                    changed = true
+                end
+                -- Always resync baseline to prevent false deltas on future BAG_UPDATEs
+                item.lastBagCount = combinedCount
+            end
+        end
+    end
+
+    if changed then
+        self:RefreshAllUI()
+    end
+end
+
+-- Get combined bags + bank item counts
+function MLT:ScanBagsAndBankForItems()
+    local found = self:ScanBagsForItems()
+    -- Merge bank cache
+    for itemID, count in pairs(self.bankItemCache) do
+        found[itemID] = (found[itemID] or 0) + count
+    end
+    return found
+end
+
+-- Initialize baselines for farm items missing lastBagCount (migration).
+-- Sets currentQty and lastBagCount to current bag count so no false deltas occur.
+function MLT:InitFarmItemBaselines()
+    if not self.db or not self.db.lists then return end
+    local bagItems = self:ScanBagsForItems()  -- bags only (bank cache is empty at login)
+
+    for _, list in pairs(self.db.lists) do
+        if list.listType == "farm" then
+            for _, item in ipairs(list.items) do
+                if item.lastBagCount == nil then
+                    local bagCount = bagItems[item.itemID] or 0
+                    item.lastBagCount = bagCount
+                    item.currentQty = bagCount
+                end
+            end
+        end
+    end
 end
 
 ----------------------------------------------
@@ -744,8 +829,8 @@ function MLT:AddFarmItem(listID, itemID, targetQty)
         return false, "loading"
     end
 
-    -- Check bags for current count
-    local bagItems = self:ScanBagsForItems()
+    -- Check bags + bank for current count
+    local bagItems = self:ScanBagsAndBankForItems()
     local currentQty = bagItems[itemID] or 0
 
     local newItem = {
@@ -758,6 +843,7 @@ function MLT:AddFarmItem(listID, itemID, targetQty)
         obtained = false,
         targetQty = targetQty,
         currentQty = currentQty,
+        lastBagCount = currentQty,
         note = "",
         addedAt = time(),
         sortOrder = #list.items,
@@ -788,7 +874,7 @@ function MLT:IncrementFarmItemCount(listID, itemID, amount)
     return false
 end
 
--- Set farm item count directly
+-- Set farm item count directly (also resyncs lastBagCount to avoid false deltas)
 function MLT:SetFarmItemCount(listID, itemID, count)
     local list = self.db.lists[listID]
     if not list then return false end
@@ -796,6 +882,9 @@ function MLT:SetFarmItemCount(listID, itemID, count)
     for _, item in ipairs(list.items) do
         if item.itemID == itemID then
             item.currentQty = count or 0
+            -- Resync lastBagCount to current inventory so the next scan doesn't produce a false delta
+            local bagItems = self:ScanBagsAndBankForItems()
+            item.lastBagCount = bagItems[itemID] or 0
             if item.targetQty and item.currentQty >= item.targetQty then
                 item.obtained = true
                 item.obtainedDate = time()
@@ -832,24 +921,31 @@ function MLT:SetFarmItemTargetQty(listID, itemID, targetQty)
     return false
 end
 
--- Sync all farm items' currentQty from bags
+-- Sync all farm items' currentQty from bags + bank
+-- Only increments currentQty when new items are detected (never decrements on craft/use)
 function MLT:SyncFarmItemsFromBags()
-    local bagItems = self:ScanBagsForItems()
+    local bagItems = self:ScanBagsAndBankForItems()
     local changed = false
 
     for _, list in pairs(self.db.lists) do
         if list.listType == "farm" then
             for _, item in ipairs(list.items) do
                 local bagCount = bagItems[item.itemID] or 0
-                if (item.currentQty or 0) ~= bagCount then
-                    item.currentQty = bagCount
-                    if item.targetQty and bagCount >= item.targetQty then
+                local lastBag = item.lastBagCount or 0
+
+                if bagCount > lastBag then
+                    -- New items detected: increment currentQty by the difference
+                    local delta = bagCount - lastBag
+                    item.currentQty = (item.currentQty or 0) + delta
+                    if item.targetQty and item.currentQty >= item.targetQty then
                         item.obtained = true
                         item.obtainedDate = item.obtainedDate or time()
-                    else
-                        item.obtained = false
-                        item.obtainedDate = nil
                     end
+                    changed = true
+                end
+                -- Always update lastBagCount to track current inventory state
+                if lastBag ~= bagCount then
+                    item.lastBagCount = bagCount
                     changed = true
                 end
             end

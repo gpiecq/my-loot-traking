@@ -91,6 +91,15 @@ function MLT:PLAYER_LOGIN()
     self.frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     self.frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     self.frame:RegisterEvent("BAG_UPDATE")
+    self.frame:RegisterEvent("BANKFRAME_OPENED")
+    self.frame:RegisterEvent("BANKFRAME_CLOSED")
+    self.frame:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
+    self.frame:RegisterEvent("PLAYERBANKBAGSLOTS_CHANGED")
+
+    -- Initialize lastBagCount for existing farm items (migration from old data)
+    C_Timer.After(1, function()
+        self:InitFarmItemBaselines()
+    end)
 
     -- Build item source database (EJ + AtlasLoot data) after a short delay
     C_Timer.After(5, function()
@@ -132,6 +141,41 @@ function MLT:BAG_UPDATE()
         end
     end)
 end
+
+----------------------------------------------
+-- Bank events: cache bank contents for farm tracking
+----------------------------------------------
+function MLT:BANKFRAME_OPENED()
+    self.bankOpen = true
+    if self.UpdateBankCache then
+        self:UpdateBankCache()
+    end
+    -- Resync baselines without false increments
+    if self.OnBankCacheUpdated then
+        self:OnBankCacheUpdated()
+    end
+end
+
+function MLT:BANKFRAME_CLOSED()
+    self.bankOpen = false
+end
+
+function MLT:PLAYERBANKSLOTS_CHANGED()
+    if not self.bankOpen then return end
+    -- Debounce bank updates
+    if self.bankUpdateTimer then return end
+    self.bankUpdateTimer = C_Timer.After(0.5, function()
+        self.bankUpdateTimer = nil
+        if self.UpdateBankCache then
+            self:UpdateBankCache()
+        end
+        if self.OnBankCacheUpdated then
+            self:OnBankCacheUpdated()
+        end
+    end)
+end
+
+MLT.PLAYERBANKBAGSLOTS_CHANGED = MLT.PLAYERBANKSLOTS_CHANGED
 
 ----------------------------------------------
 -- Utility: Print
