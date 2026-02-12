@@ -81,15 +81,20 @@ function MLT:CHAT_MSG_LOOT(msg, ...)
     -- Check if this item is tracked
     if not self.trackedItemCache[itemID] then return end
 
-    -- Determine if it was us who looted it
-    local playerName = UnitName("player")
+    -- Determine if it was us who looted it (must match official self-loot patterns only)
     local isPersonalLoot = false
 
-    -- Check for "You receive loot:" pattern (varies by locale)
-    -- Use prefix before %s so the item link in the middle doesn't break matching
-    local selfPrefix = LOOT_ITEM_SELF:gsub("%%s.*", "")
-    if msg:find(selfPrefix, 1, true) or msg:find(playerName, 1, true) then
-        isPersonalLoot = true
+    local selfPatterns = {
+        LOOT_ITEM_SELF and LOOT_ITEM_SELF:gsub("%%s", ""),
+        LOOT_ITEM_SELF_MULTIPLE and LOOT_ITEM_SELF_MULTIPLE:gsub("%%s", ""):gsub("%%d", ""),
+        LOOT_ITEM_PUSHED_SELF and LOOT_ITEM_PUSHED_SELF:gsub("%%s", ""),
+        LOOT_ITEM_PUSHED_SELF_MULTIPLE and LOOT_ITEM_PUSHED_SELF_MULTIPLE:gsub("%%s", ""):gsub("%%d", ""),
+    }
+    for _, pattern in ipairs(selfPatterns) do
+        if pattern and pattern ~= "" and msg:find(pattern, 1, true) then
+            isPersonalLoot = true
+            break
+        end
     end
 
     if isPersonalLoot then
