@@ -11,16 +11,21 @@ function MLT:InitTooltipHooks()
 
     -- Hook the main game tooltip
     GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
-        MLT:OnTooltipSetItem(tooltip)
+        local ok, err = pcall(MLT.OnTooltipSetItem, MLT, tooltip)
+        if not ok then MLT:Print("|cffff0000Tooltip error:|r " .. tostring(err)) end
     end)
 
     -- Hook ItemRefTooltip (shift-clicked items in chat)
     ItemRefTooltip:HookScript("OnTooltipSetItem", function(tooltip)
-        MLT:OnTooltipSetItem(tooltip)
+        local ok, err = pcall(MLT.OnTooltipSetItem, MLT, tooltip)
+        if not ok then MLT:Print("|cffff0000Tooltip error:|r " .. tostring(err)) end
     end)
 
-    -- Clear tracked item when tooltip hides
+    -- Clear tracked item when tooltips hide
     GameTooltip:HookScript("OnHide", function()
+        MLT.currentTooltipItemID = nil
+    end)
+    ItemRefTooltip:HookScript("OnHide", function()
         MLT.currentTooltipItemID = nil
     end)
 end
@@ -39,19 +44,23 @@ function MLT:OnTooltipSetItem(tooltip)
     self.currentTooltipItemID = itemID
 
     -- Hook the tooltip owner for Ctrl+RightClick (once per frame)
-    local owner = tooltip:GetOwner()
-    if owner and not owner.mltCtrlClickHooked then
-        owner.mltCtrlClickHooked = true
-        owner:HookScript("OnMouseDown", function(_, button)
-            if button == "RightButton" and IsControlKeyDown() and MLT.currentTooltipItemID then
-                local id = MLT.currentTooltipItemID
-                MLT.currentTooltipItemID = nil
-                local source = MLT.GetAtlasLootContext and MLT:GetAtlasLootContext() or nil
-                C_Timer.After(0, function()
-                    MLT:ShowAddToListMenu(id, source)
-                end)
-            end
-        end)
+    -- Skip for ItemRefTooltip: Ctrl+RightClick is already handled in SetItemRef override,
+    -- and hooking OnMouseDown on its owner (UIParent/chat frame) can block WoW input
+    if tooltip ~= ItemRefTooltip then
+        local owner = tooltip:GetOwner()
+        if owner and owner ~= UIParent and not owner.mltCtrlClickHooked then
+            owner.mltCtrlClickHooked = true
+            owner:HookScript("OnMouseDown", function(_, button)
+                if button == "RightButton" and IsControlKeyDown() and MLT.currentTooltipItemID then
+                    local id = MLT.currentTooltipItemID
+                    MLT.currentTooltipItemID = nil
+                    local source = MLT.GetAtlasLootContext and MLT:GetAtlasLootContext() or nil
+                    C_Timer.After(0, function()
+                        MLT:ShowAddToListMenu(id, source)
+                    end)
+                end
+            end)
+        end
     end
 
     -- Check if item is in any tracked list
@@ -87,18 +96,18 @@ end
 
 ----------------------------------------------
 -- Ctrl+Right-Click to add item (chat links)
+-- Use hooksecurefunc to avoid overriding the global and breaking WoW internal state
 ----------------------------------------------
-local origSetItemRef = SetItemRef
-function SetItemRef(link, text, button, chatFrame)
+hooksecurefunc("SetItemRef", function(link, text, button, chatFrame)
     if button == "RightButton" and IsControlKeyDown() then
         local itemID = MLT:ExtractItemID(link)
         if itemID then
+            -- Hide the tooltip that just opened, show our menu instead
+            ItemRefTooltip:Hide()
             MLT:ShowAddToListMenu(itemID)
-            return
         end
     end
-    origSetItemRef(link, text, button, chatFrame)
-end
+end)
 
 ----------------------------------------------
 -- Show "Add to List" Menu
