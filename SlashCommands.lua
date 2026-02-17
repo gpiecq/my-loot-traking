@@ -46,6 +46,9 @@ function MLT:HandleSlashCommand(msg)
     elseif cmd == "debugsource" then
         self:DebugSourceInfo()
 
+    elseif cmd == "debug" then
+        self:DebugUIFreeze()
+
     else
         self:Print(format(L["UNKNOWN_COMMAND"], cmd))
         self:PrintHelp()

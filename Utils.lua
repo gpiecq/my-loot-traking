@@ -384,3 +384,94 @@ function MLT:Decode(encoded)
     end
     return items
 end
+
+----------------------------------------------
+-- Debug UI Freeze (scan all frames for blockers)
+----------------------------------------------
+function MLT:DebugUIFreeze()
+    self:Print("=== MLT UI Debug ===")
+
+    -- 1. Check UIParent mouse state
+    self:Print("UIParent mouse: " .. tostring(UIParent:IsMouseEnabled()))
+
+    -- 2. Check mouse focus
+    if GetMouseFoci then
+        local foci = GetMouseFoci()
+        if foci then
+            for i, f in ipairs(foci) do
+                self:Print("MouseFocus " .. i .. ": " .. (f:GetName() or "unnamed") .. " strata=" .. f:GetFrameStrata())
+            end
+        end
+    elseif GetMouseFocus then
+        local f = GetMouseFocus()
+        if f then
+            self:Print("MouseFocus: " .. (f:GetName() or "unnamed") .. " strata=" .. f:GetFrameStrata())
+        end
+    end
+
+    -- 3. Check known MLT frames
+    local mltFrames = {
+        {"MLTMainFrame", self.mainFrame},
+        {"MLTSearchFrame", self.searchFrame},
+        {"MLTAlertFrame", self.alertFrame},
+        {"MLTDungeonEntry", self.dungeonEntryFrame},
+        {"MLTMiniTracker", self.miniTracker},
+        {"MLTConfigFrame", self.configFrame},
+    }
+    for _, info in ipairs(mltFrames) do
+        local name, frame = info[1], info[2]
+        if frame and frame:IsShown() then
+            self:Print("|cffff0000SHOWN:|r " .. name .. " strata=" .. frame:GetFrameStrata() .. " mouse=" .. tostring(frame:IsMouseEnabled()))
+        end
+    end
+
+    -- 4. Check ItemRefTooltip
+    if ItemRefTooltip and ItemRefTooltip:IsShown() then
+        self:Print("|cffff0000SHOWN:|r ItemRefTooltip strata=" .. ItemRefTooltip:GetFrameStrata())
+    end
+
+    -- 5. Check DropDownLists
+    for i = 1, 5 do
+        local dd = _G["DropDownList" .. i]
+        if dd and dd:IsShown() then
+            self:Print("|cffff0000SHOWN:|r DropDownList" .. i .. " w=" .. math.floor(dd:GetWidth()) .. " h=" .. math.floor(dd:GetHeight()))
+        end
+    end
+
+    -- 6. Check StaticPopups
+    for i = 1, 4 do
+        local popup = _G["StaticPopup" .. i]
+        if popup and popup:IsShown() then
+            self:Print("|cffff0000SHOWN:|r StaticPopup" .. i .. " text=" .. tostring(popup.text and popup.text:GetText()))
+        end
+    end
+
+    -- 7. Scan ALL visible frames at high strata with mouse enabled
+    self:Print("-- High strata mouse frames --")
+    local found = 0
+    local f = EnumerateFrames()
+    while f do
+        if f:IsVisible() and f:IsMouseEnabled() then
+            local s = f:GetFrameStrata()
+            if s == "FULLSCREEN" or s == "FULLSCREEN_DIALOG" or s == "TOOLTIP" or s == "DIALOG" then
+                local w, h = f:GetWidth(), f:GetHeight()
+                if w > 200 or h > 200 then
+                    local name = f:GetName() or "unnamed"
+                    self:Print("  " .. name .. " strata=" .. s .. " size=" .. math.floor(w) .. "x" .. math.floor(h) .. " alpha=" .. string.format("%.2f", f:GetAlpha()))
+                    found = found + 1
+                end
+            end
+        end
+        f = EnumerateFrames(f)
+    end
+    if found == 0 then
+        self:Print("  (none)")
+    end
+
+    -- 8. Try to fix
+    self:Print("-- Attempting fix --")
+    CloseDropDownMenus()
+    if ItemRefTooltip then ItemRefTooltip:Hide() end
+    UIParent:EnableMouse(false)
+    self:Print("Done. Can you click now?")
+end

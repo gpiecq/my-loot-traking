@@ -82,16 +82,23 @@ function MLT:CHAT_MSG_LOOT(msg, ...)
     if not self.trackedItemCache[itemID] then return end
 
     -- Determine if it was us who looted it (must match official self-loot patterns only)
+    -- Use only the prefix before %s, because the full string minus %s is not a contiguous substring
     local isPersonalLoot = false
 
+    local function selfLootPrefix(globalStr)
+        if not globalStr then return nil end
+        local prefix = globalStr:match("^(.-)%%s")
+        return prefix and prefix ~= "" and prefix or nil
+    end
+
     local selfPatterns = {
-        LOOT_ITEM_SELF and LOOT_ITEM_SELF:gsub("%%s", ""),
-        LOOT_ITEM_SELF_MULTIPLE and LOOT_ITEM_SELF_MULTIPLE:gsub("%%s", ""):gsub("%%d", ""),
-        LOOT_ITEM_PUSHED_SELF and LOOT_ITEM_PUSHED_SELF:gsub("%%s", ""),
-        LOOT_ITEM_PUSHED_SELF_MULTIPLE and LOOT_ITEM_PUSHED_SELF_MULTIPLE:gsub("%%s", ""):gsub("%%d", ""),
+        selfLootPrefix(LOOT_ITEM_SELF),
+        selfLootPrefix(LOOT_ITEM_SELF_MULTIPLE),
+        selfLootPrefix(LOOT_ITEM_PUSHED_SELF),
+        selfLootPrefix(LOOT_ITEM_PUSHED_SELF_MULTIPLE),
     }
     for _, pattern in ipairs(selfPatterns) do
-        if pattern and pattern ~= "" and msg:find(pattern, 1, true) then
+        if pattern and msg:find(pattern, 1, true) then
             isPersonalLoot = true
             break
         end
