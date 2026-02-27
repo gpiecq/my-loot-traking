@@ -88,7 +88,7 @@ function MLT:OnTooltipSetItem(tooltip)
     -- Add the "Add to MLT" hint at the bottom
     tooltip:AddLine(" ")
     tooltip:AddDoubleLine(
-        self.ADDON_COLOR .. "Ctrl+Right-Click|r",
+        self.ADDON_COLOR .. self.L["CTRL_RIGHT_CLICK"] .. "|r",
         self.ADDON_COLOR .. self.L["ADD_ITEM"] .. "|r"
     )
     tooltip:Show()

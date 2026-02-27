@@ -5,7 +5,7 @@
 ## Notes-deDE: Verfolge Loot-Wunschlisten für alle Charaktere. Benachrichtigungen bei Drops!
 ## Notes-esES: Rastrea listas de botín en todos tus personajes. ¡Alertas cuando un objeto cae!
 ## Author: MyLootTraking Team
-## Version: 1.0.0
+## Version: 1.1.0
 ## SavedVariables: MyLootTrakingDB
 ## SavedVariablesPerCharacter: MyLootTrakingCharDB
 

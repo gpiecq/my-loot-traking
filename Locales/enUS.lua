@@ -173,3 +173,19 @@ L["SET_TARGET_QTY"] = "Set Target Quantity"
 L["RESET_COUNT"] = "Reset Count"
 L["FARM_PROGRESS"] = "%d/%d"
 L["SELECT_LIST_TYPE"] = "Select list type:"
+
+-- Integration
+L["ATLASLOOT_INTEGRATED"] = "AtlasLoot integration active (%d buttons hooked)"
+
+-- Interface Options
+L["ADDON_DESCRIPTION"] = "Loot Wishlist Tracker"
+L["OPEN_SETTINGS"] = "Open Settings"
+
+-- Database
+L["SOURCE_UPDATED"] = "%d existing item source(s) updated."
+
+-- Default names
+L["DEFAULT_FARM_NAME"] = "Farm"
+
+-- Tooltip hints
+L["CTRL_RIGHT_CLICK"] = "Ctrl+Right-Click"
