@@ -155,6 +155,22 @@ L["RESET_COUNT"] = "Reinitialiser le compteur"
 L["FARM_PROGRESS"] = "%d/%d"
 L["SELECT_LIST_TYPE"] = "Type de liste :"
 
+-- Integration
+L["ATLASLOOT_INTEGRATED"] = "Intégration AtlasLoot active (%d boutons connectés)"
+
+-- Interface Options
+L["ADDON_DESCRIPTION"] = "Suivi de liste de loot"
+L["OPEN_SETTINGS"] = "Ouvrir les paramètres"
+
+-- Database
+L["SOURCE_UPDATED"] = "%d source(s) d'objet existante(s) mise(s) à jour."
+
+-- Default names
+L["DEFAULT_FARM_NAME"] = "Farm"
+
+-- Tooltip hints
+L["CTRL_RIGHT_CLICK"] = "Ctrl+Clic droit"
+
 ----------------------------------------------
 -- Instance & Boss name translations (EN -> FR)
 -- Used to display localized names from static data

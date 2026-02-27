@@ -247,6 +247,6 @@ function MLT:HookAtlasLootFrames()
     end
 
     if hooked > 0 then
-        MLT:Print("AtlasLoot integration active (" .. hooked .. " buttons hooked)")
+        MLT:Print(format(MLT.L["ATLASLOOT_INTEGRATED"], hooked))
     end
 end

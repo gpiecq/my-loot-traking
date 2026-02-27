@@ -1,0 +1,55 @@
+name: Release Addon
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from TOC
+        id: version
+        run: |
+          VERSION=$(grep -oP '## Version: \K.*' MyLootTraking.toc)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if release already exists
+        id: check
+        run: |
+          if gh release view "v${{ steps.version.outputs.version }}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare addon folder
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          ADDON_NAME="MyLootTraking"
+          mkdir -p "build/$ADDON_NAME/Locales" "build/$ADDON_NAME/tools"
+
+          cp *.toc "build/$ADDON_NAME/"
+          cp *.lua "build/$ADDON_NAME/"
+          cp Locales/*.lua "build/$ADDON_NAME/Locales/"
+          cp -r tools/*.ps1 "build/$ADDON_NAME/tools/" 2>/dev/null || true
+
+      - name: Create ZIP
+        if: steps.check.outputs.exists == 'false'
+        run: cd build && zip -r ../MyLootTraking-${{ steps.version.outputs.tag }}.zip MyLootTraking/
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "MyLootTraking-${{ steps.version.outputs.tag }}.zip" \
+            --title "MyLootTraking ${{ steps.version.outputs.tag }}" \
+            --notes-file CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

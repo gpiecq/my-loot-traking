@@ -19,8 +19,11 @@ jobs:
           cp *.toc *.lua "build/$ADDON_NAME/"
           cp Locales/*.lua "build/$ADDON_NAME/Locales/"
 
+      - name: Create ZIP
+        run: cd build && zip -r ../MyLootTraking.zip MyLootTraking/
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: MyLootTraking
-          path: build/MyLootTraking
+          path: MyLootTraking.zip

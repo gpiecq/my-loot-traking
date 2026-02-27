@@ -234,8 +234,8 @@ function MLT:ShowConfirmDialog(text, onAccept)
 
     StaticPopupDialogs[dialogName] = {
         text = text,
-        button1 = "OK",
-        button2 = "Cancel",
+        button1 = MLT.L["OK"],
+        button2 = MLT.L["CANCEL"],
         OnAccept = onAccept or function() end,
         timeout = 0,
         whileDead = true,
@@ -255,8 +255,8 @@ end
 
 StaticPopupDialogs["MLT_INPUT"] = {
     text = "%s",
-    button1 = "OK",
-    button2 = "Cancel",
+    button1 = MLT.L["OK"],
+    button2 = MLT.L["CANCEL"],
     hasEditBox = true,
     editBoxWidth = 250,
     OnAccept = function(self)
@@ -304,7 +304,7 @@ end
 ----------------------------------------------
 StaticPopupDialogs["MLT_COPY"] = {
     text = "%s",
-    button1 = "OK",
+    button1 = MLT.L["OK"],
     hasEditBox = true,
     editBoxWidth = 300,
     OnShow = function(self)

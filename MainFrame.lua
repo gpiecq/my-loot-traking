@@ -242,7 +242,7 @@ function MLT:ShowNewListDialog()
         info.text = "|cff44cc44" .. L["LIST_TYPE_FARM_SHORT"] .. "|r"
         info.notCheckable = true
         info.func = function()
-            local defaultName = "Farm"
+            local defaultName = L["DEFAULT_FARM_NAME"]
             MLT:ShowInputDialog(L["ENTER_LIST_NAME"], function(name)
                 if name and name ~= "" then
                     MLT:CreateList(name, "farm")

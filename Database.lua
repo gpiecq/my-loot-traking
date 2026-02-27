@@ -576,7 +576,7 @@ function MLT:UpdateExistingItemSources()
     end
 
     if updated > 0 then
-        self:Print(updated .. " existing item source(s) updated.")
+        self:Print(format(self.L["SOURCE_UPDATED"], updated))
         self:RefreshAllUI()
     end
 end
